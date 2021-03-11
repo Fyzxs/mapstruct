@@ -628,13 +628,16 @@ public class BeanMappingMethod extends NormalTypeMappingMethod {
 
             // The rules for picking a constructor are the following:
             // 1. Constructor annotated with @Default (from any package) has highest precedence
-            // 2. If there is a single public constructor then it would be used to construct the object
-            // 3. If a parameterless constructor exists then it would be used to construct the object, and the other
+            // 2. If configured to use the single largest parameter constructor, use that
+            // 3. If there is a single public constructor then it would be used to construct the object
+            // 4. If a parameterless constructor exists then it would be used to construct the object, and the other
             // constructors will be ignored
             ExecutableElement defaultAnnotatedConstructor = null;
             ExecutableElement parameterLessConstructor = null;
+            ExecutableElement mostParametersConstructor = null;
             List<ExecutableElement> accessibleConstructors = new ArrayList<>( constructors.size() );
             List<ExecutableElement> publicConstructors = new ArrayList<>( );
+            boolean multipleMostParametersConstructor = false;
 
             for ( ExecutableElement constructor : constructors ) {
                 if ( constructor.getModifiers().contains( Modifier.PRIVATE ) ) {
@@ -645,6 +648,23 @@ public class BeanMappingMethod extends NormalTypeMappingMethod {
                     // We found a constructor annotated with @Default everything else is irrelevant
                     defaultAnnotatedConstructor = constructor;
                     break;
+                }
+
+                if ( ctx.getOptions().isUseMostParametersConstructor() && !constructor.getParameters().isEmpty() ) {
+                    // If configured to select the single most parameter constructor
+                    // and the new constructor has parameters (no parameters is handled separately)
+                    if ( mostParametersConstructor == null ||
+                            mostParametersConstructor.getParameters().size() < constructor.getParameters().size() ) {
+                        // Select the constructor if one hasn't been set
+                        // or if the constructor has more parameters than our existing selection
+                        mostParametersConstructor = constructor;
+                        // Assigning a new mostParametersConstructor means we don't have multiple
+                        multipleMostParametersConstructor = false;
+                    }
+                    else if ( mostParametersConstructor.getParameters().size() == constructor.getParameters().size() ) {
+                        // If the constructors have the same length, flag it.
+                        multipleMostParametersConstructor = true;
+                    }
                 }
 
                 if ( constructor.getParameters().isEmpty() ) {
@@ -662,6 +682,14 @@ public class BeanMappingMethod extends NormalTypeMappingMethod {
             if ( defaultAnnotatedConstructor != null ) {
                 // If a default annotated constructor exists it will be used, it has highest precedence
                 return getConstructorAccessor( type, defaultAnnotatedConstructor );
+            }
+
+            if ( ctx.getOptions().isUseMostParametersConstructor() &&
+                    !multipleMostParametersConstructor &&
+                    mostParametersConstructor != null ) {
+                // If configured to use the largest parameter
+                // and there aren't multiple at the same length
+                return getConstructorAccessor( type, mostParametersConstructor );
             }
 
             if ( publicConstructors.size() == 1 ) {
